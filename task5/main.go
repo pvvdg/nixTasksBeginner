@@ -47,9 +47,6 @@ func main() {
 		if err != nil {
 			log.Fatalln("Unable to create file:", err)
 		}
-		if err != nil {
-			log.Fatal(err)
-		}
 		defer file.Close()
 		file.WriteString(postToFile(&wg, url))
 	}
