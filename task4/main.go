@@ -30,14 +30,21 @@ func service(wg *sync.WaitGroup, url string) {
 		log.Fatalln(err)
 	}
 	json.Unmarshal(body, &user)
-	fmt.Printf("{ UserId:%d Id:%d Title:%s Body:%s }\n", user.UserId, user.Id, user.Title[:10], user.Body[:10])
+	// fmt.Printf("{ UserId:%d Id:%d Title:%s Body:%s }\n", user.UserId, user.Id, user.Title[:10], user.Body[:10])
+	user.Title = user.Title[:10]
+	user.Body = user.Body[:10]
+	result, err := json.Marshal(user)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	fmt.Println(string(result))
 }
 
 func main() {
 	wg := sync.WaitGroup{}
 	url := ""
-	// N := 5
-	N := 100
+	N := 5
+	// N := 100
 	wg.Add(N)
 	for i := 1; i <= N; i++ {
 		url = "https://jsonplaceholder.typicode.com/posts/" + strconv.Itoa(i)
