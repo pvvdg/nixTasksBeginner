@@ -19,9 +19,10 @@ type User struct {
 	Body   string `json:"body"`
 }
 
-func postToFile(wg *sync.WaitGroup, url string) string {
-	user := User{}
+func requestToFile(wg *sync.WaitGroup, url string, i int) {
 	defer wg.Done()
+	user := User{}
+	url += strconv.Itoa(i)
 	resp, err := http.Get(url)
 	if err != nil {
 		log.Fatalln(err)
@@ -31,24 +32,23 @@ func postToFile(wg *sync.WaitGroup, url string) string {
 		log.Fatalln(err)
 	}
 	json.Unmarshal(body, &user)
-
-	return fmt.Sprintf("{ UserId:%d Id:%d Title:%s Body:%s }\n", user.UserId, user.Id, user.Title[:10], user.Body[:10])
+	file, err := os.Create(strconv.Itoa(i) + ".txt")
+	if err != nil {
+		log.Fatalln("Unable to create file:", err)
+	}
+	defer file.Close()
+	file.WriteString(fmt.Sprintf("{ UserId:%d Id:%d Title:%s Body:%s }\n", user.UserId, user.Id, user.Title[:10], user.Body[:10]))
 }
 
 func main() {
 	wg := sync.WaitGroup{}
-	url := ""
+	url := "https://jsonplaceholder.typicode.com/posts/"
 	N := 5
 	// N := 100
 	wg.Add(N)
 	for i := 1; i <= N; i++ {
-		url = "https://jsonplaceholder.typicode.com/posts/" + strconv.Itoa(i)
-		file, err := os.Create(strconv.Itoa(i) + ".txt")
-		if err != nil {
-			log.Fatalln("Unable to create file:", err)
-		}
-		defer file.Close()
-		file.WriteString(postToFile(&wg, url))
+		go requestToFile(&wg, url, i)
 	}
 	wg.Wait()
+	log.Println("OK")
 }
