@@ -33,6 +33,27 @@ type Comment struct {
 	Body   string `json:"body"`
 }
 
+func dbConn() (db *sql.DB) {
+	dbDriver := "mysql"
+	dbUser := "root"
+	dbPass := "desgrad"
+	dbName := "jsonplaceholder"
+	db, err := sql.Open(dbDriver, dbUser+":"+dbPass+"@tcp(127.0.0.1:3306)/"+dbName)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return db
+}
+
+func checkConnectAndVersionDB(db *sql.DB) {
+	var version string
+	errQueryRow := db.QueryRow("SELECT VERSION()").Scan(&version)
+	if errQueryRow != nil {
+		log.Fatal(errQueryRow)
+	}
+	log.Println("Connection:OK version MySQL is", version)
+}
+
 func getBody(url string) ([]byte, error) {
 	resp, err := http.Get(url)
 	if err != nil {
@@ -55,14 +76,13 @@ func getPosts(url string) *Posts {
 	return posts
 }
 
-func getAndAppendCommentsIntoDB(db *sql.DB, nameDB string, chanPostID chan int, N int) {
-	start := time.Now()
+func getAndAppendCommentsIntoDB(db *sql.DB, nameDB string, chanPostID chan int, countPosts int) {
 	wg := &sync.WaitGroup{}
 	mu := &sync.Mutex{}
 	var comments = Comments{}
 	url := "https://jsonplaceholder.typicode.com/comments?postId="
-	wg.Add(N)
-	for i := 0; i < N; i++ {
+	wg.Add(countPosts)
+	for i := 0; i < countPosts; i++ {
 		go func() {
 			mu.Lock()
 			defer wg.Done()
@@ -72,11 +92,13 @@ func getAndAppendCommentsIntoDB(db *sql.DB, nameDB string, chanPostID chan int, 
 					log.Fatal(err)
 				}
 				json.Unmarshal(body, &comments)
-
-				for j := 0; j < len(comments); j++ {
+				countComments := len(comments)
+				for j := 0; j < countComments; j++ {
 					go func(j int) {
-						// comments.insertIntoDBComments(db, nameDB)
-						fmt.Println("Goroutine is ", j, " ", comments[j].Id, "\t", comments[j].Email, "\t ")
+						if _, err := db.Exec("INSERT INTO "+nameDB+" (`post_id`,`id`,`name`,`email`,`body`) VALUES(?,?,?,?,?)",
+							comments[j].PostId, comments[j].Id, comments[j].Name, comments[j].Email, comments[j].Body); err != nil {
+							log.Fatal(err)
+						}
 					}(j)
 				}
 			}
@@ -84,90 +106,16 @@ func getAndAppendCommentsIntoDB(db *sql.DB, nameDB string, chanPostID chan int, 
 		}()
 	}
 	wg.Wait()
-	fmt.Println(time.Since(start))
 }
 
-func dbConn() (db *sql.DB) {
-	dbDriver := "mysql"
-	dbUser := "root"
-	dbPass := "desgrad"
-	dbName := "jsonplaceholder"
-	db, err := sql.Open(dbDriver, dbUser+":"+dbPass+"@tcp(127.0.0.1:3306)/"+dbName)
-	if err != nil {
-		log.Fatal(err)
-	}
-	return db
-}
-
-func checkConnectAndVersionDB(db *sql.DB) {
-	var version string
-	errQueryRow := db.QueryRow("SELECT VERSION()").Scan(&version)
-	if errQueryRow != nil {
-		log.Fatal(errQueryRow)
-	}
-	log.Println("Connection:OK version MySQL is", version)
-}
-
-func (c *Comments) showFromDBComments(db *sql.DB, nameDB string) {
-	rows, err := db.Query("SELECT * FROM " + nameDB + ";")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	for rows.Next() {
-		var postId int
-		var id int
-		var name string
-		var email string
-		var body string
-		err = rows.Scan(&postId, &id, &name, &email, &body)
-		if err != nil {
-			log.Fatal(err)
-		}
-		fmt.Printf("%v | %v | %v | %v | %v\n", postId, id, name[:10], email, body[:10])
-	}
-}
-
-func (c *Comments) insertIntoDBComments(db *sql.DB, nameDB string) {
-	stmt, err := db.Prepare("INSERT " + nameDB + " SET post_id=?,id=?,name=?,email=?,body=?;")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer stmt.Close()
-	for _, v := range *c {
-		if _, err := stmt.Exec(v.PostId, v.Id, v.Name, v.Email, v.Body); err != nil {
-			log.Fatal(err)
-		}
-	}
-	log.Println("Insert OK")
-}
-
-func (p *Posts) showFromDBPosts(db *sql.DB, nameDB string) {
-	rows, err := db.Query("SELECT * FROM " + nameDB + ";")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	for rows.Next() {
-		var user_id int
-		var id int
-		var title string
-		var body string
-		err = rows.Scan(&user_id, &id, &title, &body)
-		if err != nil {
-			log.Fatal(err)
-		}
-		fmt.Printf("%v | %v | %v | %v |\n", user_id, id, title[:10], body[:10])
-	}
-}
-
-func (p *Posts) insertIntoDBPosts(db *sql.DB, nameDB string) {
+func insertIntoDBPosts(db *sql.DB, nameDB string) {
+	var posts = Posts{}
 	stmt, err := db.Prepare("INSERT " + nameDB + " SET user_id=?,id=?,title=?,body=?;")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer stmt.Close()
-	for _, v := range *p {
+	for _, v := range posts {
 		if _, err := stmt.Exec(v.UserId, v.Id, v.Title, v.Body); err != nil {
 			log.Fatal(err)
 		}
@@ -175,29 +123,19 @@ func (p *Posts) insertIntoDBPosts(db *sql.DB, nameDB string) {
 	log.Println("Insert OK")
 }
 
-func (p *Posts) deleteFromDBPosts(db *sql.DB, nameDB string) {
-	stmt, err := db.Prepare("DELETE FROM " + nameDB + " WHERE id=?;")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer stmt.Close()
-	for _, v := range *p {
-		if _, err := stmt.Exec(v.Id); err != nil {
-			log.Fatal(err)
-		}
-	}
-	log.Println("Delete OK")
-}
-
 func main() {
+	start := time.Now()
+
 	db := dbConn()
-	defer db.Close()
 
 	checkConnectAndVersionDB(db)
 
 	url := "https://jsonplaceholder.typicode.com/posts?userId=7"
 	posts := getPosts(url)
 	countPosts := len(*posts)
+	nameDB := "posts"
+
+	go insertIntoDBPosts(db, nameDB)
 
 	chanPostID := make(chan int, countPosts)
 
@@ -205,16 +143,9 @@ func main() {
 		chanPostID <- v.Id
 	}
 
-	nameDB := "comments"
+	nameDB = "comments"
 	getAndAppendCommentsIntoDB(db, nameDB, chanPostID, countPosts)
-	// fmt.Println(comments)
+	fmt.Println(time.Since(start))
 
-	/*
-		nameDB := "posts"
-		posts.insertDBPosts(db, nameDB)
-		posts.showDBPosts(db, nameDB)
-		posts.deleteDBPosts(db, nameDB)
-		posts.showDBPosts(db, nameDB)
-	*/
-
+	db.Close()
 }
