@@ -55,11 +55,11 @@ func getPosts(url string) *Posts {
 	return posts
 }
 
-func getAndAppendCommentsIntoDB(chanPostID chan int, N int) {
+func getAndAppendCommentsIntoDB(db *sql.DB, nameDB string, chanPostID chan int, N int) {
 	start := time.Now()
-	wg := sync.WaitGroup{}
-	mu := sync.Mutex{}
-	var comments = &Comments{}
+	wg := &sync.WaitGroup{}
+	mu := &sync.Mutex{}
+	var comments = Comments{}
 	url := "https://jsonplaceholder.typicode.com/comments?postId="
 	wg.Add(N)
 	for i := 0; i < N; i++ {
@@ -71,12 +71,13 @@ func getAndAppendCommentsIntoDB(chanPostID chan int, N int) {
 				if err != nil {
 					log.Fatal(err)
 				}
-				json.Unmarshal(body, comments)
+				json.Unmarshal(body, &comments)
 
-				for _, v := range *comments {
-					go func(v Comment) {
-						fmt.Println(v.Id, "\t", v.Email, "\t ")
-					}(v)
+				for j := 0; j < len(comments); j++ {
+					go func(j int) {
+						// comments.insertIntoDBComments(db, nameDB)
+						fmt.Println("Goroutine is ", j, " ", comments[j].Id, "\t", comments[j].Email, "\t ")
+					}(j)
 				}
 			}
 			mu.Unlock()
@@ -127,9 +128,8 @@ func (c *Comments) showFromDBComments(db *sql.DB, nameDB string) {
 	}
 }
 
-func insertIntoDBComments(db *sql.DB, nameDB string) {
-	c := &Comments{}
-	stmt, err := db.Prepare("INSERT " + nameDB + " SET user_id=?,id=?,title=?,body=?;")
+func (c *Comments) insertIntoDBComments(db *sql.DB, nameDB string) {
+	stmt, err := db.Prepare("INSERT " + nameDB + " SET post_id=?,id=?,name=?,email=?,body=?;")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -205,7 +205,8 @@ func main() {
 		chanPostID <- v.Id
 	}
 
-	getAndAppendCommentsIntoDB(chanPostID, countPosts)
+	nameDB := "comments"
+	getAndAppendCommentsIntoDB(db, nameDB, chanPostID, countPosts)
 	// fmt.Println(comments)
 
 	/*
