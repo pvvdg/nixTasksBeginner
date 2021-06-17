@@ -67,75 +67,92 @@ func getBody(url string) ([]byte, error) {
 }
 
 func getPosts(url string) *Posts {
-	var posts = &Posts{}
+	var p = &Posts{}
 	body, err := getBody(url)
 	if err != nil {
 		log.Fatal(err)
 	}
-	json.Unmarshal(body, &posts)
-	return posts
+	json.Unmarshal(body, &p)
+	return p
 }
 
-func getAndAppendCommentsIntoDB(db *sql.DB, nameDB string, chanPostID chan int, countPosts int) {
-	wg := &sync.WaitGroup{}
-	mu := &sync.Mutex{}
-	var comments = Comments{}
+/*
+func getComments(url string) *Comments {
+	var c = &Comments{}
+	body, err := getBody(url)
+	if err != nil {
+		log.Fatal(err)
+	}
+	json.Unmarshal(body, &c)
+	return c
+}*/
+
+func getAndAppendCommentsIntoDB(wg *sync.WaitGroup, db *sql.DB, nameDB string, chanPostID chan int, countPosts int) {
+	stmt := `INSERT INTO ` + nameDB + ` (post_id,id,name,email,body) VALUES(?,?,?,?,?)`
+	var c = &Comments{}
 	url := "https://jsonplaceholder.typicode.com/comments?postId="
 	wg.Add(countPosts)
 	for i := 0; i < countPosts; i++ {
 		go func() {
-			mu.Lock()
 			defer wg.Done()
 			if val, opened := <-chanPostID; opened {
 				body, err := getBody(url + strconv.Itoa(val))
 				if err != nil {
 					log.Fatal(err)
 				}
-				json.Unmarshal(body, &comments)
-				countComments := len(comments)
-				for j := 0; j < countComments; j++ {
-					go func(j int) {
-						if _, err := db.Exec("INSERT INTO "+nameDB+" (`post_id`,`id`,`name`,`email`,`body`) VALUES(?,?,?,?,?)",
-							comments[j].PostId, comments[j].Id, comments[j].Name, comments[j].Email, comments[j].Body); err != nil {
+				json.Unmarshal(body, &c)
+
+				countComments := len(*c)
+				wg.Add(countComments)
+				for i, v := range *c {
+					v := v
+					go func(i int, v *Comment) {
+						defer wg.Done()
+						if _, err := db.Exec(stmt, v.PostId, v.Id, v.Name, v.Email, v.Body); err != nil {
 							log.Fatal(err)
 						}
-					}(j)
+						fmt.Println(i, " ", v.Id)
+					}(i, &v)
 				}
+				// wg.Wait()
 			}
-			mu.Unlock()
 		}()
 	}
 	wg.Wait()
 }
 
-func insertIntoDBPosts(db *sql.DB, nameDB string) {
-	var posts = Posts{}
-	stmt, err := db.Prepare("INSERT " + nameDB + " SET user_id=?,id=?,title=?,body=?;")
-	if err != nil {
-		log.Fatal(err)
+func (p *Posts) insertIntoDBPosts(wg *sync.WaitGroup, db *sql.DB, nameDB string) {
+	stmt := `INSERT INTO ` + nameDB + ` (user_id,id,title,body) VALUES(?,?,?,?)`
+	lenPosts := len(*p)
+	wg.Add(lenPosts)
+	for _, v := range *p {
+		v := v
+		go func(v *Post) {
+			defer wg.Done()
+			if _, err := db.Exec(stmt, v.UserId, v.Id, v.Title, v.Body); err != nil {
+				log.Fatal(err)
+			}
+		}(&v)
 	}
-	defer stmt.Close()
-	for _, v := range posts {
-		if _, err := stmt.Exec(v.UserId, v.Id, v.Title, v.Body); err != nil {
-			log.Fatal(err)
-		}
-	}
-	log.Println("Insert OK")
+	wg.Wait()
 }
 
 func main() {
 	start := time.Now()
 
 	db := dbConn()
+	defer db.Close()
 
 	checkConnectAndVersionDB(db)
+
+	wg := &sync.WaitGroup{}
 
 	url := "https://jsonplaceholder.typicode.com/posts?userId=7"
 	posts := getPosts(url)
 	countPosts := len(*posts)
 	nameDB := "posts"
 
-	go insertIntoDBPosts(db, nameDB)
+	posts.insertIntoDBPosts(wg, db, nameDB)
 
 	chanPostID := make(chan int, countPosts)
 
@@ -144,8 +161,7 @@ func main() {
 	}
 
 	nameDB = "comments"
-	getAndAppendCommentsIntoDB(db, nameDB, chanPostID, countPosts)
-	fmt.Println(time.Since(start))
+	getAndAppendCommentsIntoDB(wg, db, nameDB, chanPostID, countPosts)
 
-	db.Close()
+	fmt.Println(time.Since(start))
 }
