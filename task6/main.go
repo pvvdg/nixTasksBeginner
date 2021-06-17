@@ -87,13 +87,16 @@ func getComments(url string) *Comments {
 	return c
 }*/
 
-func getAndAppendCommentsIntoDB(wg *sync.WaitGroup, db *sql.DB, nameDB string, chanPostID chan int, countPosts int) {
-	stmt := `INSERT INTO ` + nameDB + ` (post_id,id,name,email,body) VALUES(?,?,?,?,?)`
+func getAndAppendCommentsIntoDB(wg *sync.WaitGroup, mu *sync.Mutex, db *sql.DB, nameDB string, chanPostID chan int, countPosts int) {
 	var c = &Comments{}
+
+	stmt := `INSERT INTO ` + nameDB + ` (post_id,id,name,email,body) VALUES(?,?,?,?,?)`
+
 	url := "https://jsonplaceholder.typicode.com/comments?postId="
 	wg.Add(countPosts)
 	for i := 0; i < countPosts; i++ {
 		go func() {
+			mu.Lock()
 			defer wg.Done()
 			if val, opened := <-chanPostID; opened {
 				body, err := getBody(url + strconv.Itoa(val))
@@ -111,11 +114,10 @@ func getAndAppendCommentsIntoDB(wg *sync.WaitGroup, db *sql.DB, nameDB string, c
 						if _, err := db.Exec(stmt, v.PostId, v.Id, v.Name, v.Email, v.Body); err != nil {
 							log.Fatal(err)
 						}
-						fmt.Println(i, " ", v.Id)
 					}(i, &v)
 				}
-				// wg.Wait()
 			}
+			mu.Unlock()
 		}()
 	}
 	wg.Wait()
@@ -146,6 +148,7 @@ func main() {
 	checkConnectAndVersionDB(db)
 
 	wg := &sync.WaitGroup{}
+	mu := &sync.Mutex{}
 
 	url := "https://jsonplaceholder.typicode.com/posts?userId=7"
 	posts := getPosts(url)
@@ -154,14 +157,14 @@ func main() {
 
 	posts.insertIntoDBPosts(wg, db, nameDB)
 
-	chanPostID := make(chan int, countPosts)
+	chanPostID := make(chan int, 10)
 
 	for _, v := range *posts {
 		chanPostID <- v.Id
 	}
 
 	nameDB = "comments"
-	getAndAppendCommentsIntoDB(wg, db, nameDB, chanPostID, countPosts)
+	getAndAppendCommentsIntoDB(wg, mu, db, nameDB, chanPostID, countPosts)
 
 	fmt.Println(time.Since(start))
 }
